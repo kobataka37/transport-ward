@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>病棟 検査連携ポータル</title>
+  <script src="[https://cdn.tailwindcss.com](https://cdn.tailwindcss.com)"></script>
+  <script src="[https://unpkg.com/react@18/umd/react.production.min.js](https://unpkg.com/react@18/umd/react.production.min.js)" crossorigin></script>
+  <script src="[https://unpkg.com/react-dom@18/umd/react-dom.production.min.js](https://unpkg.com/react-dom@18/umd/react-dom.production.min.js)" crossorigin></script>
+  <script src="[https://unpkg.com/@babel/standalone/babel.min.js](https://unpkg.com/@babel/standalone/babel.min.js)"></script>
+  <script src="[https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js](https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js)"></script>
+  <script src="[https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js](https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js)"></script>
+  <script src="[https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js](https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js)"></script>
+</head>
+<body class="bg-gray-900 flex justify-center items-center min-h-screen">
+  <div id="root" class="w-full max-w-[390px]"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyAGmEL7f0f-tluguX87xOOrPPetH3F4uSs",
+      authDomain: "callsystemdatabase.firebaseapp.com",
+      projectId: "callsystemdatabase",
+      storageBucket: "callsystemdatabase.firebasestorage.app",
+      messagingSenderId: "214007172640",
+      appId: "1:214007172640:web:392c87463f7eeb08c87645"
+    };
+
+    const appId = 'callsystemdatabase-app';
+
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+    const auth = firebase.auth();
+
+    function App() {
+      const [patients, setPatients] = useState([]);
+      const [selectedWard, setSelectedWard] = useState('A病棟');
+      const [user, setUser] = useState(null);
+      const [loading, setLoading] = useState(true);
+
+      useEffect(() => {
+        auth.signInAnonymously().then((cred) => {
+          setUser(cred.user);
+          setLoading(false);
+        });
+      }, []);
+
+      useEffect(() => {
+        if (!user) return;
+        const patientsRef = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('patients');
+        const unsubscribe = patientsRef.onSnapshot((snapshot) => {
+          const list = [];
+          snapshot.forEach((doc) => {
+            list.push({ id: doc.id, ...doc.data() });
+          });
+          setPatients(list);
+        });
+        return () => unsubscribe();
+      }, [user]);
+
+      const formatTime = (date) => {
+        return `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
+      };
+
+      const addMinutesToTimeStr = (timeStr, mins) => {
+        const [h, m] = timeStr.split(':').map(Number);
+        const date = new Date();
+        date.setHours(h);
+        date.setMinutes(m + mins);
+        return formatTime(date);
+      };
+
+      const updateStatus = async (id, newStatus, payload = {}) => {
+        const patientsRef = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('patients');
+        const nowStr = formatTime(new Date());
+
+        const patient = patients.find(p => p.id === id);
+        if (!patient) return;
+
+        const updateData = {
+          status: newStatus,
+          delayedMinutes: payload.minutes !== undefined ? payload.minutes : (newStatus === 'waiting' ? null : patient.delayedMinutes),
+          delayedTime: payload.time !== undefined ? payload.time : (newStatus === 'waiting' ? null : patient.delayedTime),
+          delayType: payload.delayType !== undefined ? payload.delayType : (newStatus === 'waiting' ? null : patient.delayType),
+          repliedAt: ['ready', 'delayed', 'unavailable'].includes(newStatus) ? nowStr : (newStatus === 'waiting' ? null : patient.repliedAt),
+          callType: newStatus === 'waiting' ? null : patient.callType,
+          scheduledTime: newStatus === 'waiting' ? null : patient.scheduledTime,
+          updatedAt: new Date().toISOString()
+        };
+
+        await patientsRef.doc(id).set(updateData, { merge: true });
+      };
+
+      if (loading) {
+        return <div className="text-white text-center">読み込み中...</div>;
+      }
+
+      return (
+        <div className="h-[92vh] bg-gray-100 flex flex-col rounded-[2rem] shadow-2xl border-4 border-gray-700 overflow-hidden">
+          {/* ヘッダー */}
+          <div className="bg-indigo-600 text-white pt-8 pb-3 px-4 flex justify-between items-center shadow-md shrink-0">
+            <h2 className="font-bold text-sm">📱 病棟 検査連携</h2>
+            <select 
+              className="bg-indigo-700 text-white border-none rounded py-1 px-2 font-bold text-xs"
+              value={selectedWard}
+              onChange={(e) => setSelectedWard(e.target.value)}
+            >
+              <option value="A病棟">A病棟</option>
+              <option value="B病棟">B病棟</option>
+              <option value="C病棟">C病棟</option>
+            </select>
+          </div>
+
+          {/* リストエリア */}
+          <div className="p-3 overflow-y-auto flex-1 space-y-3">
+            {patients.filter(p => p.ward === selectedWard).map(p => {
+              const isCalled = p.status === 'called';
+              const isTransferRequested = p.status === 'transfer_requested';
+
+              let cardStyle = "bg-white p-3 rounded-xl border border-gray-200 shadow-sm";
+              if (isCalled) cardStyle = "bg-white p-3 rounded-xl border-2 border-red-500 shadow-lg ring-4 ring-red-50";
+              if (isTransferRequested) cardStyle = "bg-purple-50 p-3 rounded-xl border-2 border-purple-600 shadow-lg";
+
+              return (
+                <div key={p.id} className={cardStyle}>
+                  <div className="flex justify-between items-start mb-1">
+                    <div>
+                      <div className="text-[10px] text-gray-500">{p.time} 予定 • {p.examType}</div>
+                      <div className="text-base font-bold text-gray-900">{p.name} 様</div>
+                    </div>
+                  </div>
+
+                  {/* 検査室からの事前確認が来た時 */}
+                  {isCalled && (
+                    <div className="mt-3 pt-3 border-t border-red-100">
+                      <p className="text-xs text-red-800 font-bold mb-2">
+                        {p.callType === 'scheduled' ? `【打診】${p.scheduledTime} 頃に搬送可能ですか？` : "【打診】今すぐ搬送可能ですか？"}
+                      </p>
+                      <div className="space-y-1.5">
+                        <button onClick={() => updateStatus(p.id, 'ready')} className="w-full py-2 bg-green-600 hover:bg-green-700 text-white font-bold rounded text-xs shadow">すぐ搬送可能</button>
+                        <div className="grid grid-cols-3 gap-1">
+                          <button onClick={() => updateStatus(p.id, 'delayed', { minutes: 10, delayType: 'minutes' })} className="py-1 bg-yellow-500 hover:bg-yellow-600 text-white font-bold rounded text-[10px]">10分後</button>
+                          <button onClick={() => updateStatus(p.id, 'delayed', { minutes: 20, delayType: 'minutes' })} className="py-1 bg-yellow-500 hover:bg-yellow-600 text-white font-bold rounded text-[10px]">20分後</button>
+                          <button onClick={() => updateStatus(p.id, 'delayed', { minutes: 30, delayType: 'minutes' })} className="py-1 bg-yellow-500 hover:bg-yellow-600 text-white font-bold rounded text-[10px]">30分後</button>
+                        </div>
+                        <button onClick={() => updateStatus(p.id, 'unavailable')} className="w-full py-1 bg-gray-600 hover:bg-gray-700 text-white text-xs rounded">現在対応不可</button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 最終搬送指示が来た時 */}
+                  {isTransferRequested && (
+                    <div className="mt-2 p-2 bg-purple-100 rounded text-center">
+                      <p className="text-xs text-purple-800 font-bold animate-bounce">🚨 搬送開始指示！</p>
+                      <p className="text-sm font-black text-purple-900 mt-1">今すぐ検査室へ搬送してください</p>
+                    </div>
+                  )}
+
+                  {/* 待機ガイダンス */}
+                  {['ready', 'delayed'].includes(p.status) && (
+                    <div className="mt-2 text-[10px] text-gray-500 text-center bg-gray-50 p-1 rounded">
+                      返答済。放射線科の確定指示をお待ちください。
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>

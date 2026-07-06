@@ -12,7 +12,7 @@
 
     <div class="w-full max-w-md bg-gray-50 flex flex-col min-h-screen shadow-2xl border-x border-gray-200">
         <header class="bg-indigo-600 text-white pt-6 pb-3 px-4 shadow-md flex items-center justify-between sticky top-0 z-40">
-            <h2 class="text-base font-bold flex items-center"><i class="fa-solid fa-mobile-screen-button mr-2"></i>病棟 検査確認ポータル</h2>
+            <h2 class="text-base font-bold flex items-center"><i class="fa-solid fa-mobile-screen-button mr-2"></i>病棟 検査・お迎え確認</h2>
             <select id="ward-selector" class="text-xs bg-indigo-700 text-white border-none rounded py-1 px-2 font-bold outline-none cursor-pointer">
                 <option value="A病棟">A病棟</option>
                 <option value="B病棟">B病棟</option>
@@ -61,40 +61,72 @@
             renderCards();
         });
 
-        function renderCards() {
+        // 時刻フォーマット用ヘルパー
+        function getNowTimeStr() {
+            const d = new Date();
+            return `${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`;
+        }
+
+        //        function renderCards() {
             const container = document.getElementById("card-container");
             container.innerHTML = "";
 
+            // completed(完全完了) 以外の、選択病棟の患者を抽出
             const filtered = patientsData.filter(p => p.ward === currentWard && p.status !== 'completed');
             if(filtered.length === 0) {
                 container.innerHTML = `<div class="text-center py-12 text-sm text-gray-400 bg-white rounded-xl shadow-sm border">現在、対象の患者はいません。</div>`;
                 return;
             }
 
+            // 緊急度・ステータス順にソート (お迎え依頼中 ➜ 搬送指示済 ➜ 搬送確認中 ➜ 予定時間順)
             filtered.sort((a, b) => {
-                if (a.status === 'transfer_requested' && b.status !== 'transfer_requested') return -1;
-                if (a.status !== 'transfer_requested' && b.status === 'transfer_requested') return 1;
-                if (a.status === 'called' && b.status !== 'called') return -1;
-                if (a.status !== 'called' && b.status === 'called') return 1;
+                const priority = {
+                    'pickup_requested': 1,
+                    'transfer_requested': 2,
+                    'called': 3,
+                    'pickup_replied': 4,
+                    'exam_in_progress': 5,
+                    'ready': 6,
+                    'delayed': 6,
+                    'unavailable': 7,
+                    'waiting': 8
+                };
+                const pa = priority[a.status] || 99;
+                const pb = priority[b.status] || 99;
+                if (pa !== pb) return pa - pb;
                 return (a.time || '').localeCompare(b.time || '');
             }).forEach(p => {
                 const card = document.createElement("div");
                 
+                // ステータスに応じた枠線と背景デザイン
                 let cardStyle = "bg-white border border-gray-200 shadow-sm";
                 if(p.status === 'ready' || p.status === 'delayed') cardStyle = "bg-white border-2 border-green-500 shadow-md";
                 if(p.status === 'unavailable') cardStyle = "bg-white border border-gray-300 opacity-60";
                 if(p.status === 'called') cardStyle = "bg-white border-2 border-red-500 shadow-lg ring-4 ring-red-100 animate-fade-in";
                 if(p.status === 'transfer_requested') cardStyle = "bg-purple-50 border-2 border-purple-600 shadow-xl ring-4 ring-purple-100";
+                if(p.status === 'exam_in_progress') cardStyle = "bg-blue-50/50 border border-blue-300 shadow-sm opacity-90";
+                if(p.status === 'pickup_requested') cardStyle = "bg-amber-50 border-2 border-amber-500 shadow-2xl ring-4 ring-amber-100";
+                if(p.status === 'pickup_replied') cardStyle = "bg-emerald-50 border border-emerald-400 shadow-md";
 
                 card.className = `p-4 rounded-xl transition-all ${cardStyle}`;
 
+                // 右上の状態バッジの決定
                 let statusBadge = "";
+                if(p.status === 'waiting') statusBadge = `<span class="bg-gray-100 text-gray-600 text-[11px] font-bold px-2 py-0.5 rounded">検査前待機</span>`;
                 if(p.status === 'ready') statusBadge = `<span class="bg-green-100 text-green-700 text-[11px] font-bold px-2 py-0.5 rounded">すぐ搬送可(答)</span>`;
                 if(p.status === 'delayed') {
                     const txt = p.delayType === 'time' ? `${p.delayedTime}可` : `${p.delayedMinutes}分後可`;
                     statusBadge = `<span class="bg-yellow-100 text-yellow-800 text-[11px] font-bold px-2 py-0.5 rounded">${txt}</span>`;
                 }
                 if(p.status === 'unavailable') statusBadge = `<span class="bg-gray-600 text-white text-[11px] font-medium px-2 py-0.5 rounded">現在不可(答)</span>`;
+                if(p.status === 'exam_in_progress') statusBadge = `<span class="bg-blue-100 text-blue-800 text-[11px] font-bold px-2 py-0.5 rounded"><i class="fa-solid fa-spinner animate-spin mr-1"></i>検査中</span>`;
+                if(p.status === 'pickup_replied') {
+                    let repText = "お迎え回答済";
+                    if(p.pickupReplyType === 'go_now') repText = "すぐ迎え中";
+                    if(p.pickupReplyType === 'when_free') repText = "手空き次第迎え";
+                    if(p.pickupReplyType === 'custom_time') repText = `${p.pickupReplyTime}頃 迎え`;
+                    statusBadge = `<span class="bg-emerald-600 text-white text-[11px] font-bold px-2 py-0.5 rounded">${repText}</span>`;
+                }
 
                 let innerHTML = `
                     <div class="flex justify-between items-start mb-1">
@@ -106,7 +138,8 @@
                     </div>
                 `;
 
-                if(p.status !== 'called' && p.note) {
+                // 警告メモエリア (再調整中など)
+                if(p.status !== 'called' && p.status !== 'pickup_requested' && p.note) {
                     innerHTML += `
                         <div class="mt-2 p-2 bg-red-50 border border-red-200 rounded-lg text-xs font-bold text-red-900 flex items-center gap-1.5">
                             <i class="fa-solid fa-triangle-exclamation text-red-500"></i>
@@ -115,6 +148,7 @@
                     `;
                 }
 
+                // 1. 搬送確認中（送り出しの打診が来た時）
                 if(p.status === 'called') {
                     const isSched = p.callType === 'scheduled';
                     const displayTime = p.scheduledTime || '時間指定';
@@ -122,7 +156,7 @@
                     innerHTML += `
                         <div class="mt-3 pt-3 border-t border-red-100">
                             <div class="bg-red-50 p-2 rounded-lg text-xs font-bold text-red-900 mb-3">
-                                <span class="text-red-500 block text-[10px]"><i class="fa-solid fa-circle-exclamation animate-bounce"></i> 放射線科より打診</span>
+                                <span class="text-red-500 block text-[10px]"><i class="fa-solid fa-circle-exclamation animate-bounce"></i> 放射線科より搬送打診</span>
                                 <span class="text-sm font-black leading-tight">
                                     ${isSched ? `検査室に <span class="text-purple-700 underline font-black">[ ${displayTime} ]</span> ごろ搬送可能ですか？` : '今からすぐ検査室に搬送可能ですか？'}
                                 </span>
@@ -148,8 +182,10 @@
                     `;
                 }
 
+                // 2. 最終確定：搬送GOサイン受信時
                 if(p.status === 'transfer_requested') {
-                    let textTime = "今すぐ、検査室へ搬送してください";
+                    // ★ご要望どおり「今から、検査室へ〜」にマイルドに変更
+                    let textTime = "今から、検査室へ搬送してください";
                     if(p.delayType === 'time' && p.delayedTime) textTime = `【 ${p.delayedTime} 】に検査室へ到着するよう搬送してください`;
                     else if(p.repliedAt && p.delayedMinutes) {
                         const [h, m] = p.repliedAt.split(':').map(Number);
@@ -159,18 +195,69 @@
                         textTime = `【 ${p.scheduledTime} 】に検査室へ到着するよう搬送してください`;
                     }
 
+                    // 車椅子の跳ねるアニメーション付き
                     innerHTML += `
-                        <div class="mt-3 pt-3 border-t border-purple-200 bg-purple-600 -mx-4 -mb-4 p-3 rounded-b-xl text-white text-center">
-                          <p class="text-sm font-black flex items-center justify-center gap-1">
-                                <i class="fa-solid fa-wheelchair-move animate-bounce"></i> 最終確定：搬送開始してください
+                        <div class="mt-3 pt-3 border-t border-purple-200 bg-purple-600 -mx-4 -mb-4 p-3 rounded-b-xl text-white text-center animate-pulse">
+                            <p class="text-sm font-black flex items-center justify-center gap-1">
+                                <i class="fa-solid fa-wheelchair-move animate-bounce"></i> 最終確定：搬送開始
                             </p>
                             <p class="text-xs mt-1 font-bold opacity-90 bg-purple-700 p-1.5 rounded-lg">${textTime}</p>
                         </div>
                     `;
                 }
 
+                //                // 3. お迎え依頼受信時 (放射線科からお迎え確認の打診が来た時)
+                if(p.status === 'pickup_requested') {
+                    const isPickupSched = p.pickupCallType === 'scheduled';
+                    const displayPickupTime = p.pickupScheduledTime || '時間指定';
+
+                    innerHTML += `
+                        <div class="mt-3 pt-3 border-t border-amber-300">
+                            <div class="bg-amber-100 p-2.5 rounded-lg text-xs font-bold text-amber-950 mb-3">
+                                <span class="text-amber-700 block text-[10px]"><i class="fa-solid fa-bell animate-bounce mr-1"></i>放射線科よりお迎え打診</span>
+                                <span class="text-sm font-black leading-tight">
+                                    ${isPickupSched ? `およそ <span class="text-blue-700 underline font-black">[ ${displayPickupTime} ]</span> ごろにお迎えをお願いできますか？` : '検査が終わりました。今からすぐお迎えをお願いできますか？'}
+                                </span>
+                            </div>
+                            
+                            <div class="space-y-2">
+                                <button onclick="replyPickup('${p.id}', 'go_now')" class="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-lg shadow"><i class="fa-solid fa-person-walking-arrow-right mr-1"></i> 今から迎えに行く</button>
+                                <button onclick="replyPickup('${p.id}', 'when_free')" class="w-full py-2 bg-yellow-600 hover:bg-yellow-700 text-white text-xs font-bold rounded-lg shadow">手が空き次第向かう</button>
+                                
+                                <div class="flex items-center justify-between gap-1.5 bg-amber-100 p-1.5 rounded-lg border border-amber-300">
+                                    <span class="text-xs font-bold text-amber-950 shrink-0">お迎え時間を指定:</span>
+                                    <input type="time" id="custom-pickup-time-${p.id}" class="w-[80px] p-0.5 text-xs border border-amber-300 font-mono text-center font-bold bg-white rounded shadow-sm outline-none">
+                                    <button onclick="replyPickupCustomTime('${p.id}')" class="px-3 py-1 bg-amber-600 text-white text-xs font-bold rounded shadow-sm">送信</button>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }
+
+                // 4. お迎えを回答して、迎えに向かっている時の案内
+                if(p.status === 'pickup_replied') {
+                    let textMsg = "お迎え調整が完了しました";
+                    if(p.pickupReplyType === 'go_now') textMsg = "「今から迎えに行く」とお伝えしました。";
+                    if(p.pickupReplyType === 'when_free') textMsg = "「手が空き次第行く」とお伝えしました。";
+                    if(p.pickupReplyType === 'custom_time') textMsg = `「 ${p.pickupReplyTime} 頃に迎えに行く」とお伝えしました。`;
+
+                    innerHTML += `
+                        <div class="mt-3 pt-3 border-t border-emerald-200 text-emerald-900 text-xs font-bold text-center bg-emerald-100/50 p-2 rounded-lg">
+                            <i class="fa-solid fa-check-double mr-1 text-emerald-600"></i>
+                            <span>${textMsg}</span>
+                            <span class="block text-[10px] text-gray-500 font-normal mt-1">放射線科でお迎えの到着を待っています。</span>
+                        </div>
+                    `;
+                }
+
+                // 案内のみ (搬送回答済みの待機状態)
                 if(['ready', 'delayed', 'unavailable'].includes(p.status)) {
                     innerHTML += `<div class="mt-2 pt-1.5 text-[10px] text-gray-400 text-center border-t border-gray-100 bg-gray-50 rounded">放射線科の「最終確定（GOサイン）」を待っています...</div>`;
+                }
+
+                // 案内のみ (受付して現在検査中の状態)
+                if(p.status === 'exam_in_progress') {
+                    innerHTML += `<div class="mt-2 pt-1.5 text-[10px] text-blue-600 text-center border-t border-blue-100 bg-blue-50/50 rounded font-bold">現在、検査室で検査が実施されています。終了連絡をお待ちください。</div>`;
                 }
 
                 card.innerHTML = innerHTML;
@@ -178,35 +265,49 @@
             });
         }
 
+        // --- Firebase送信関数群 ---
+
         window.replyStatus = async function(id, status) {
-            const d = new Date();
-            const nowStr = `${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`;
             const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'patients', id);
-            await setDoc(docRef, { status: status, repliedAt: nowStr, updatedAt: new Date().toISOString() }, { merge: true });
+            await setDoc(docRef, { status: status, repliedAt: getNowTimeStr(), updatedAt: new Date().toISOString() }, { merge: true });
         };
 
         window.replyDelayMins = async function(id, mins, baseTimeStr) {
-            const d = new Date();
-            const nowStr = `${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`;
             const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'patients', id);
             
             if(baseTimeStr && baseTimeStr !== "null" && baseTimeStr !== "") {
                 const [h, m] = baseTimeStr.split(':').map(Number);
-                d.setHours(h); d.setMinutes(m + mins);
+                const d = new Date(); d.setHours(h); d.setMinutes(m + mins);
                 const destTimeStr = `${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`;
-                await setDoc(docRef, { status: 'delayed', delayType: 'time', delayedTime: destTimeStr, repliedAt: nowStr, updatedAt: new Date().toISOString() }, { merge: true });
+                await setDoc(docRef, { status: 'delayed', delayType: 'time', delayedTime: destTimeStr, repliedAt: getNowTimeStr(), updatedAt: new Date().toISOString() }, { merge: true });
             } else {
-                await setDoc(docRef, { status: 'delayed', delayType: 'minutes', delayedMinutes: mins, repliedAt: nowStr, updatedAt: new Date().toISOString() }, { merge: true });
+                await setDoc(docRef, { status: 'delayed', delayType: 'minutes', delayedMinutes: mins, repliedAt: getNowTimeStr(), updatedAt: new Date().toISOString() }, { merge: true });
             }
         };
 
         window.replyCustomTime = async function(id) {
             const timeVal = document.getElementById(`custom-reply-time-${id}`).value;
             if(!timeVal) return;
-            const d = new Date();
-            const nowStr = `${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`;
             const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'patients', id);
-            await setDoc(docRef, { status: 'delayed', delayType: 'time', delayedTime: timeVal, repliedAt: nowStr, updatedAt: new Date().toISOString() }, { merge: true });
+            await setDoc(docRef, { status: 'delayed', delayType: 'time', delayedTime: timeVal, repliedAt: getNowTimeStr(), updatedAt: new Date().toISOString() }, { merge: true });
+        };
+
+        // ★ 新設：お迎え依頼への回答送信処理
+        window.replyPickup = async function(id, replyType, customTime = null) {
+            const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'patients', id);
+            await setDoc(docRef, {
+                status: 'pickup_replied',
+                pickupReplyType: replyType,
+                pickupReplyTime: customTime,
+                pickupRepliedAt: getNowTimeStr(),
+                updatedAt: new Date().toISOString()
+            }, { merge: true });
+        };
+
+        window.replyPickupCustomTime = function(id) {
+            const timeVal = document.getElementById(`custom-pickup-time-${id}`).value;
+            if(!timeVal) return;
+            window.replyPickup(id, 'custom_time', timeVal);
         };
     </script>
 </body>

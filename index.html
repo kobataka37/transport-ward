@@ -6,19 +6,13 @@
     <title>病棟検査連携 - スマホ端末</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <style>
-        body { -webkit-tap-highlight-color: transparent; }
-    </style>
+    <style>body { -webkit-tap-highlight-color: transparent; }</style>
 </head>
 <body class="bg-gray-100 font-sans min-h-screen flex justify-center">
 
     <div class="w-full max-w-md bg-gray-50 flex flex-col min-h-screen shadow-2xl border-x border-gray-200">
-        
         <header class="bg-indigo-600 text-white pt-6 pb-3 px-4 shadow-md flex items-center justify-between sticky top-0 z-40">
-            <h2 class="text-base font-bold flex items-center">
-                <i class="fa-solid fa-mobile-screen-button mr-2"></i>
-                病棟 検査確認ポータル
-            </h2>
+            <h2 class="text-base font-bold flex items-center"><i class="fa-solid fa-mobile-screen-button mr-2"></i>病棟 検査確認ポータル</h2>
             <select id="ward-selector" class="text-xs bg-indigo-700 text-white border-none rounded py-1 px-2 font-bold outline-none cursor-pointer">
                 <option value="A病棟">A病棟</option>
                 <option value="B病棟">B病棟</option>
@@ -53,15 +47,12 @@
         let patientsData = [];
         let currentWard = "A病棟";
 
-        // 匿名認証してデータ購読
         signInAnonymously(auth);
 
         const patientsRef = collection(db, 'artifacts', appId, 'public', 'data', 'patients');
         onSnapshot(patientsRef, (snapshot) => {
             patientsData = [];
-            snapshot.forEach(doc => {
-                patientsData.push({ id: doc.id, ...doc.data() });
-            });
+            snapshot.forEach(doc => patientsData.push({ id: doc.id, ...doc.data() }));
             renderCards();
         });
 
@@ -75,13 +66,11 @@
             container.innerHTML = "";
 
             const filtered = patientsData.filter(p => p.ward === currentWard && p.status !== 'completed');
-            
             if(filtered.length === 0) {
                 container.innerHTML = `<div class="text-center py-12 text-sm text-gray-400 bg-white rounded-xl shadow-sm border">現在、対象の患者はいません。</div>`;
                 return;
             }
 
-            // 表示の優先順位: 最終指示が最上位、次いで事前確認呼び出し、最後に待機
             filtered.sort((a, b) => {
                 if (a.status === 'transfer_requested' && b.status !== 'transfer_requested') return -1;
                 if (a.status !== 'transfer_requested' && b.status === 'transfer_requested') return 1;
@@ -99,7 +88,6 @@
 
                 card.className = `p-4 rounded-xl transition-all ${cardStyle}`;
 
-                // 右上のバッジ解析
                 let statusBadge = "";
                 if(p.status === 'ready') statusBadge = `<span class="bg-green-100 text-green-700 text-[11px] font-bold px-2 py-0.5 rounded">すぐ搬送可(答)</span>`;
                 if(p.status === 'delayed') {
@@ -118,7 +106,6 @@
                     </div>
                 `;
 
-                // 警告メモ（放射線科側からの再調整時など）
                 if(p.status !== 'called' && p.note) {
                     innerHTML += `
                         <div class="mt-2 p-2 bg-red-50 border border-red-200 rounded-lg text-xs font-bold text-red-900 flex items-center gap-1.5">
@@ -128,24 +115,25 @@
                     `;
                 }
 
-                // 特殊ケース1: 事前確認(called)の応答ボタン
                 if(p.status === 'called') {
-                    const isSched = p.callType === 'scheduled' && p.scheduledTime;
+                    const isSched = p.callType === 'scheduled';
+                    const displayTime = p.scheduledTime || '時間指定';
+
                     innerHTML += `
                         <div class="mt-3 pt-3 border-t border-red-100">
                             <div class="bg-red-50 p-2 rounded-lg text-xs font-bold text-red-900 mb-3">
                                 <span class="text-red-500 block text-[10px]"><i class="fa-solid fa-circle-exclamation animate-bounce"></i> 放射線科より打診</span>
                                 <span class="text-sm font-black leading-tight">
-                                    ${isSched ? `検査室に <span class="text-purple-700 underline font-black">[ ${p.scheduledTime} ]</span> ごろ搬送可能ですか？` : '今からすぐ検査室に搬送可能ですか？'}
+                                    ${isSched ? `検査室に <span class="text-purple-700 underline font-black">[ ${displayTime} ]</span> ごろ搬送可能ですか？` : '今からすぐ検査室に搬送可能ですか？'}
                                 </span>
                             </div>
                             <div class="space-y-2">
-                                <button onclick="replyStatus('${p.id}', 'ready')" class="w-full py-2.5 bg-green-600 text-white text-sm font-bold rounded-lg shadow"><i class="fa-regular fa-circle-check mr-1"></i> ${isSched ? p.scheduledTime+' に搬送可能' : 'すぐ搬送可能 (準備OK)'}</button>
+                                <button onclick="replyStatus('${p.id}', 'ready')" class="w-full py-2.5 bg-green-600 text-white text-sm font-bold rounded-lg shadow"><i class="fa-regular fa-circle-check mr-1"></i> ${isSched ? displayTime+' に搬送可能' : 'すぐ搬送可能 (準備OK)'}</button>
                                 
                                 <div class="grid grid-cols-3 gap-1.5 text-xs font-bold">
-                                    <button onclick="replyDelayMins('${p.id}', 10, '${p.scheduledTime}')" class="py-2 bg-yellow-500 text-white rounded-lg shadow">${isSched ? '10分遅らせる':'10分後'}</button>
-                                    <button onclick="replyDelayMins('${p.id}', 20, '${p.scheduledTime}')" class="py-2 bg-yellow-500 text-white rounded-lg shadow">${isSched ? '20分遅らせる':'20分後'}</button>
-                                    <button onclick="replyDelayMins('${p.id}', 30, '${p.scheduledTime}')" class="py-2 bg-yellow-500 text-white rounded-lg shadow">${isSched ? '30分遅らせる':'30分後'}</button>
+                                    <button onclick="replyDelayMins('${p.id}', 10, '${p.scheduledTime || ''}')" class="py-2 bg-yellow-500 text-white rounded-lg shadow">${isSched ? '10分遅らせる':'10分後'}</button>
+                                    <button onclick="replyDelayMins('${p.id}', 20, '${p.scheduledTime || ''}')" class="py-2 bg-yellow-500 text-white rounded-lg shadow">${isSched ? '20分遅らせる':'20分後'}</button>
+                                    <button onclick="replyDelayMins('${p.id}', 30, '${p.scheduledTime || ''}')" class="py-2 bg-yellow-500 text-white rounded-lg shadow">${isSched ? '30分遅らせる':'30分後'}</button>
                                 </div>
 
                                 <div class="flex items-center justify-between gap-1 bg-red-50 p-1.5 rounded-lg border border-red-200">
@@ -160,15 +148,20 @@
                     `;
                 }
 
-                // 特殊ケース2: 最終搬送指示 (Goサイン) 受信時
                 if(p.status === 'transfer_requested') {
                     let textTime = "今すぐ、検査室へ搬送してください";
                     if(p.delayType === 'time' && p.delayedTime) textTime = `【 ${p.delayedTime} 】に検査室へ到着するよう搬送してください`;
-                    else if(p.callType === 'scheduled' && p.scheduledTime) textTime = `【 ${p.scheduledTime} 】に検査室へ到着するよう搬送してください`;
+                    else if(p.repliedAt && p.delayedMinutes) {
+                        const [h, m] = p.repliedAt.split(':').map(Number);
+                        const d = new Date(); d.setHours(h); d.setMinutes(m + p.delayedMinutes);
+                        textTime = `【 ${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')} 】に検査室へ到着するよう搬送してください`;
+                    } else if(p.callType === 'scheduled' && p.scheduledTime) {
+                        textTime = `【 ${p.scheduledTime} 】に検査室へ到着するよう搬送してください`;
+                    }
 
                     innerHTML += `
                         <div class="mt-3 pt-3 border-t border-purple-200 bg-purple-600 -mx-4 -mb-4 p-3 rounded-b-xl text-white text-center">
-                            <p class="text-sm font-black flex items-center justify-center gap-1">
+                          <p class="text-sm font-black flex items-center justify-center gap-1">
                                 <i class="fa-solid fa-wheelchair-move animate-bounce"></i> 最終確定：搬送開始してください
                             </p>
                             <p class="text-xs mt-1 font-bold opacity-90 bg-purple-700 p-1.5 rounded-lg">${textTime}</p>
@@ -176,7 +169,6 @@
                     `;
                 }
 
-                // 返答待ち中状態のガイダンス
                 if(['ready', 'delayed', 'unavailable'].includes(p.status)) {
                     innerHTML += `<div class="mt-2 pt-1.5 text-[10px] text-gray-400 text-center border-t border-gray-100 bg-gray-50 rounded">放射線科の「最終確定（GOサイン）」を待っています...</div>`;
                 }
@@ -186,16 +178,11 @@
             });
         }
 
-        // 応答ロジック各種
         window.replyStatus = async function(id, status) {
             const d = new Date();
             const nowStr = `${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`;
             const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'patients', id);
-            await setDoc(docRef, {
-                status: status,
-                repliedAt: nowStr,
-                updatedAt: new Date().toISOString()
-            }, { merge: true });
+            await setDoc(docRef, { status: status, repliedAt: nowStr, updatedAt: new Date().toISOString() }, { merge: true });
         };
 
         window.replyDelayMins = async function(id, mins, baseTimeStr) {
@@ -203,19 +190,13 @@
             const nowStr = `${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`;
             const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'patients', id);
             
-            if(baseTimeStr && baseTimeStr !== "null") {
-                // 打診時刻からのプラス修正
+            if(baseTimeStr && baseTimeStr !== "null" && baseTimeStr !== "") {
                 const [h, m] = baseTimeStr.split(':').map(Number);
                 d.setHours(h); d.setMinutes(m + mins);
                 const destTimeStr = `${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`;
-                await setDoc(docRef, {
-                    status: 'delayed', delayType: 'time', delayedTime: destTimeStr, repliedAt: nowStr, updatedAt: new Date().toISOString()
-                }, { merge: true });
+                await setDoc(docRef, { status: 'delayed', delayType: 'time', delayedTime: destTimeStr, repliedAt: nowStr, updatedAt: new Date().toISOString() }, { merge: true });
             } else {
-                // 現在時刻からのプラス分指定
-                await setDoc(docRef, {
-                    status: 'delayed', delayType: 'minutes', delayedMinutes: mins, repliedAt: nowStr, updatedAt: new Date().toISOString()
-                }, { merge: true });
+                await setDoc(docRef, { status: 'delayed', delayType: 'minutes', delayedMinutes: mins, repliedAt: nowStr, updatedAt: new Date().toISOString() }, { merge: true });
             }
         };
 
@@ -225,9 +206,7 @@
             const d = new Date();
             const nowStr = `${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`;
             const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'patients', id);
-            await setDoc(docRef, {
-                status: 'delayed', delayType: 'time', delayedTime: timeVal, repliedAt: nowStr, updatedAt: new Date().toISOString()
-            }, { merge: true });
+            await setDoc(docRef, { status: 'delayed', delayType: 'time', delayedTime: timeVal, repliedAt: nowStr, updatedAt: new Date().toISOString() }, { merge: true });
         };
     </script>
 </body>
